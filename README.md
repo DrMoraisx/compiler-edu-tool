@@ -1,38 +1,23 @@
-# 🛠️ Compiler Edu Tool - Ferramenta Educacional de Compiladores
+# Compiler Edu Tool — Compilador Educacional de Mini-Python
 
-Software educacional desenvolvido para a disciplina de compiladores. O objetivo deste projeto é implementar de forma didática as fases de um compilador (começando pela análise léxica), utilizando uma arquitetura moderna baseada em microrserviços web.
+## 1. Objetivo do Projeto
+Ferramenta educacional desenvolvida para auxiliar estudantes no aprendizado de conceitos de compilação de linguagens de programação, utilizando o subconjunto **Mini-Python**.
 
-## 🎯 1. Escolha da Linguagem e Subconjunto
+## 2. Linguagem e Subconjunto Escolhido
+* **Linguagem-alvo:** Subconjunto da linguagem Python (Mini-Python).
+* **Construções Suportadas:**
+  * Declaração de variáveis e atribuições (`=`).
+  * Operações aritméticas e de comparação (`+`, `-`, `*`, `/`, `==`, `!=`, `<`, `>`).
+  * Estruturas condicionais (`if`, `else`).
+  * Chamadas de função nativa (`print()`).
+  * Definição de funções simples (`def`).
 
-* **Linguagem Escolhida:** **Mini-Python (Subconjunto Educacional)**
-* **Justificativa:** A escolha de uma variação simplificada de Python permite focar nos conceitos fundamentais de análise léxica e sintática (como reconhecimento de palavras-chave, identificadores, literais e operadores) sem a complexidade de construções avançadas da linguagem completa.
-* **Subconjunto Inicial (Etapa 1):**
-  * Atribuição de variáveis (`=`)
-  * Operadores aritméticos básicos (`+`, `-`, `*`, `/`)
-  * Identificadores e números inteiros/reais
-  * Comentários de linha (`#`)
+## 3. Tecnologias Utilizadas
+* **Backend:** Python 3.10+, FastAPI, Pytest (testes automatizados).
+* **Frontend:** React, HTML5, CSS3.
+* **Orquestração e Execução:** Docker, Docker Compose.
 
----
-
-## 🏗️ 2. Arquitetura do Projeto
-
-O projeto está dividido em dois componentes principais orquestrados via Docker Compose:
-* **Backend:** Desenvolvido em **Python (FastAPI)** na porta `8000`, responsável pelas regras de processamento e futuros algoritmos do compilador.
-* **Frontend:** Desenvolvido em **React (Node.js)** na porta `3000`, responsável pela interface gráfica do utilizador.
-
----
-
-## 🚀 3. Pré-requisitos
-
-Para executar este projeto na sua máquina, certifique-se de ter instalado:
-* [Docker Desktop](https://www.docker.com/products/docker-desktop/) (com suporte ao WSL2 no Windows)
-* [Docker Compose](https://docs.docker.com/compose/) (geralmente já incluso no Docker Desktop)
-
----
-
-## ⚙️ 4. Como Executar o Projeto (Inicialização)
-
-1. Clone o repositório para a sua máquina local:
-   ```bash
-   git clone [https://github.com/DrMoraisx/compiler-edu-tool.git](https://github.com/DrMoraisx/compiler-edu-tool.git)
-   cd compiler-edu-tool
+## 4. Instruções de Execução com Docker Compose
+Para iniciar toda a aplicação:
+```bash
+docker compose up --build -d
