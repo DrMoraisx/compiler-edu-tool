@@ -2,11 +2,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import re
+from app.parser import Parser
 
-# 1. Instanciação inicial da aplicação FastAPI (essencial vir primeiro)
-app = FastAPI(title="Compiler Edu Tool API - Lexical Analyzer")
+app = FastAPI(title="Compiler Edu Tool API")
 
-# 2. Configuração de CORS para o React
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,7 +17,6 @@ app.add_middleware(
 class CodeRequest(BaseModel):
     code: str
 
-# 3. Definição dos tipos de tokens para o nosso subconjunto de Mini-Python
 TOKEN_TYPES = [
     ("COMMENT", r"#.*"),
     ("KEYWORD", r"\b(if|else|while|def|return|print)\b"),
@@ -27,20 +25,14 @@ TOKEN_TYPES = [
     ("OPERATOR", r"==|!=|<=|>=|[+\-*/=<>]"),
     ("DELIMITER", r"[(),:\[\]{}]"),
     ("WHITESPACE", r"\s+"),
-    ("UNKNOWN", r"."),  # caractere inválido
+    ("UNKNOWN", r"."),
 ]
-
-@app.get("/")
-def read_root():
-    return {"message": "Hello, World! Backend do Compilador Educacional online."}
 
 @app.post("/api/lexical")
 def lexical_analysis(req: CodeRequest):
     code = req.code
     tokens = []
     errors = []
-    
-    # Construção da regex unificada
     master_pattern = "|".join(f"(?P<{name}>{pattern})" for name, pattern in TOKEN_TYPES)
     
     line_num = 1
@@ -67,7 +59,19 @@ def lexical_analysis(req: CodeRequest):
             
         column += len(value)
             
-    return {
-        "tokens": tokens,
-        "errors": errors
-    }
+    return {"tokens": tokens, "errors": errors}
+
+@app.post("/api/parse")
+def parse_code(req: CodeRequest):
+    # Primeiro executa a análise léxica para obter os tokens limpos (sem whitespace)
+    lex_res = lexical_analysis(req)
+    if lex_res["errors"]:
+        raise HTTPException(status_code=400, detail="Existem erros léxicos que impedem a análise sintática.")
+    
+    tokens = lex_res["tokens"]
+    try:
+        parser = Parser(tokens)
+        ast = parser.parse()
+        return {"ast": ast, "error": None}
+    except Exception as e:
+        return {"ast": None, "error": str(e)}
