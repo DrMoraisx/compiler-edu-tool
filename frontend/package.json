@@ -1,13 +1,20 @@
+
 {
-  "name": "frontend",
-  "version": "0.1.0",
+  "name": "compiler-edu-tool-frontend",
+  "version": "1.0.0",
   "private": true,
   "dependencies": {
+    "@testing-library/jest-dom": "^6.4.2",
+    "@testing-library/react": "^14.2.1",
+    "@testing-library/user-event": "^14.5.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-scripts": "5.0.1"
   },
   "scripts": {
-    "start": "react-scripts start"
-  }
+    "start": "react-scripts start",
+    "test": "react-scripts test --watchAll=false",
+    "build": "react-scripts build"
+  },
+  "proxy": "http://backend:8000"
 }

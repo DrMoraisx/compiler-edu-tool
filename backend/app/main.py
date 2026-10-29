@@ -1,77 +1,124 @@
+﻿
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import re
-from app.parser import Parser
+from pydantic import BaseModel, Field, ConfigDict
+from .lexer import tokenize, CompilerError
+from .parser import Parser
 
-app = FastAPI(title="Compiler Edu Tool API")
+from .scanner import scan
+
+app = FastAPI(
+    title="Compiler Edu Tool - Mini-Python",
+    version="3.0.0"
+)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
+
+
+
+
 class CodeRequest(BaseModel):
-    code: str
+    model_config = ConfigDict(
+        validate_by_name=True,
+        validate_by_alias=True
+    )
 
-TOKEN_TYPES = [
-    ("COMMENT", r"#.*"),
-    ("KEYWORD", r"\b(if|else|while|def|return|print)\b"),
-    ("IDENTIFIER", r"\b[a-zA-Z_][a-zA-Z0-9_]*\b"),
-    ("NUMBER", r"\b\d+(\.\d+)?\b"),
-    ("OPERATOR", r"==|!=|<=|>=|[+\-*/=<>]"),
-    ("DELIMITER", r"[(),:\[\]{}]"),
-    ("WHITESPACE", r"\s+"),
-    ("UNKNOWN", r"."),
-]
+    code: str = Field(
+        ...,
+        alias="codigo",
+        description="Código-fonte Mini-Python"
+    )
 
-@app.post("/api/lexical")
-def lexical_analysis(req: CodeRequest):
-    code = req.code
-    tokens = []
-    errors = []
-    master_pattern = "|".join(f"(?P<{name}>{pattern})" for name, pattern in TOKEN_TYPES)
-    
-    line_num = 1
-    column = 1
-    
-    for match in re.finditer(master_pattern, code):
-        kind = match.lastgroup
-        value = match.group(kind)
-        
-        if kind == "WHITESPACE":
-            line_num += value.count("\n")
-            if "\n" in value:
-                column = len(value) - value.rfind("\n")
-            else:
-                column += len(value)
-            continue
-            
-        if kind == "COMMENT":
-            tokens.append({"type": kind, "value": value, "line": line_num, "column": column})
-        elif kind == "UNKNOWN":
-            errors.append({"error": f"Caractere desconhecido '{value}'", "line": line_num, "column": column})
-        else:
-            tokens.append({"type": kind, "value": value, "line": line_num, "column": column})
-            
-        column += len(value)
-            
-    return {"tokens": tokens, "errors": errors}
+
+
+
+@app.get("/")
+def read_root():
+    return {
+        "message": "Mini-Python Compiler Backend is running",
+        "status": "active"
+    }
+
+@app.get("/health")
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
+
+
 
 @app.post("/api/parse")
-def parse_code(req: CodeRequest):
-    # Primeiro executa a análise léxica para obter os tokens limpos (sem whitespace)
-    lex_res = lexical_analysis(req)
-    if lex_res["errors"]:
-        raise HTTPException(status_code=400, detail="Existem erros léxicos que impedem a análise sintática.")
-    
-    tokens = lex_res["tokens"]
+@app.post("/api/analyze")
+def analyze_code(request: CodeRequest):
+    code = request.code
+
+    if not code:
+        raise HTTPException(
+            status_code=400,
+            detail="Informe um código-fonte antes de solicitar a análise."
+        )
+
+    if not code.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="O código-fonte não pode ser composto apenas por espaços em branco."
+        )
+
+    # Mantém a verificação léxica usada atualmente pelo projeto.
+    tokens, errors = scan(code)
+
+    # Preserva a resposta HTTP 200 para códigos que contenham
+    # erros léxicos, informando os erros no corpo da resposta.
+    if errors:
+        return {
+            "mensagem": "Análise concluída com erros léxicos.",
+            "recebido": True,
+            "sucesso": False,
+            "success": False,
+            "tokens": tokens,
+            "erros": errors,
+            "ast": None,
+            "resumo": {
+                "total_tokens": len(tokens),
+                "total_erros": len(errors)
+            }
+        }
+
     try:
-        parser = Parser(tokens)
-        ast = parser.parse()
-        return {"ast": ast, "error": None}
-    except Exception as e:
-        return {"ast": None, "error": str(e)}
+        # O lexer correto produz os tokens estruturais do parser.
+        parser_tokens = tokenize(code)
+        ast = Parser(parser_tokens).parse()
+
+    except CompilerError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=exc.mensagem
+        )
+
+    return {
+        "mensagem": "Análise concluída com sucesso.",
+        "recebido": True,
+        "sucesso": True,
+        "success": True,
+        "tokens": [
+            token for token in parser_tokens
+            if token["tipo"] != "NOVA_LINHA"
+        ],
+        "erros": [],
+        "ast": ast,
+        "resumo": {
+            "total_tokens": len(parser_tokens),
+            "total_erros": 0
+        }
+    }
+
+
+
