@@ -1,16 +1,25 @@
 ﻿
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, ConfigDict
-from .lexer import tokenize, CompilerError
-from .parser import Parser
+from pydantic import BaseModel, model_validator
 
-from .scanner import scan
+from app.lexer import analisar_lexico
+from app.parser import Parser
+
 
 app = FastAPI(
-    title="Compiler Edu Tool - Mini-Python",
-    version="3.0.0"
+    title="Mini-Python Compiler Educational Tool",
+    description=(
+        "Software educacional para análise léxica, "
+        "análise sintática e geração de AST."
+    ),
+    version="4.2.0"
 )
+
+
+# =========================================================
+# CONFIGURAÇÃO CORS
+# =========================================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,104 +30,263 @@ app.add_middleware(
 )
 
 
-
-
-
+# =========================================================
+# MODELO DE ENTRADA
+# =========================================================
 
 class CodeRequest(BaseModel):
-    model_config = ConfigDict(
-        validate_by_name=True,
-        validate_by_alias=True
-    )
+    code: str | None = None
+    codigo: str | None = None
 
-    code: str = Field(
-        ...,
-        alias="codigo",
-        description="Código-fonte Mini-Python"
-    )
+    @model_validator(mode="after")
+    def validar_codigo(self):
+        if self.code is None and self.codigo is None:
+            raise ValueError(
+                "Informe o campo 'code' ou 'codigo'."
+            )
+
+        return self
+
+    def obter_codigo(self):
+        if self.code is not None:
+            return self.code
+
+        return self.codigo
 
 
-
+# =========================================================
+# ROTAS DE SAÚDE E INFORMAÇÕES
+# =========================================================
 
 @app.get("/")
 def read_root():
     return {
-        "message": "Mini-Python Compiler Backend is running",
-        "status": "active"
+        "message": "Mini-Python Compiler Backend",
+        "status": "active",
+        "version": "4.2.0",
+        "features": [
+            "analise_lexica",
+            "analise_sintatica",
+            "ast"
+        ]
     }
 
-@app.get("/health")
+
 @app.get("/api/health")
-def health():
-    return {"status": "ok"}
+@app.get("/health")
+def health_check():
+    return {
+        "status": "ok",
+        "message": "Backend funcionando corretamente",
+        "version": "4.2.0"
+    }
 
 
+# =========================================================
+# FUNÇÕES AUXILIARES
+# =========================================================
 
+def filtrar_tokens_visiveis(tokens):
+    """
+    Mantém o formato de tokens da Etapa 3.
+
+    Os tokens estruturais continuam disponíveis em
+    tokens_parser e são exibidos pela interface atual.
+    """
+
+    estruturais = {
+        "NOVA_LINHA",
+        "INDENT",
+        "DEDENT",
+        "INDENTACAO",
+        "DESINDENTACAO",
+        "EOF"
+    }
+
+    return [
+        token
+        for token in tokens
+        if token["tipo"] not in estruturais
+    ]
+
+
+def formatar_erros_sintaticos(erros):
+    """
+    Padroniza os erros sintáticos para o contrato da API.
+    """
+
+    formatados = []
+
+    for erro in erros:
+        formatados.append({
+            "tipo": "ERRO_SINTATICO",
+            "mensagem": erro.get(
+                "mensagem",
+                "Erro na estrutura do código."
+            ),
+            "linha": erro.get("linha", 1),
+            "coluna": erro.get("coluna", 1),
+            "encontrado": erro.get("encontrado"),
+            "esperado": erro.get("esperado")
+        })
+
+    return formatados
+
+
+# =========================================================
+# ANÁLISE LÉXICA E SINTÁTICA
+# =========================================================
 
 @app.post("/api/parse")
 @app.post("/api/analyze")
-def analyze_code(request: CodeRequest):
-    code = request.code
+def parse_code(request: CodeRequest):
 
-    if not code:
+    codigo = request.obter_codigo()
+
+    if codigo is None or not codigo.strip():
         raise HTTPException(
             status_code=400,
-            detail="Informe um código-fonte antes de solicitar a análise."
+            detail=(
+                "Informe um código-fonte antes de "
+                "solicitar a análise."
+            )
         )
 
-    if not code.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="O código-fonte não pode ser composto apenas por espaços em branco."
-        )
+    # -----------------------------------------------------
+    # 1. ANÁLISE LÉXICA
+    # -----------------------------------------------------
 
-    # Mantém a verificação léxica usada atualmente pelo projeto.
-    tokens, errors = scan(code)
+    resultado_lexico = analisar_lexico(codigo)
 
-    # Preserva a resposta HTTP 200 para códigos que contenham
-    # erros léxicos, informando os erros no corpo da resposta.
-    if errors:
+    tokens_completos = resultado_lexico["tokens"]
+    erros_lexicos = resultado_lexico["erros"]
+
+    # Lista compatível com o formato visual da Etapa 3.
+    tokens_legados = filtrar_tokens_visiveis(
+        tokens_completos
+    )
+
+    # -----------------------------------------------------
+    # 2. ERROS LÉXICOS
+    # -----------------------------------------------------
+
+    if erros_lexicos:
+
         return {
-            "mensagem": "Análise concluída com erros léxicos.",
+            "message": (
+                "A análise sintática não foi executada "
+                "porque existem erros léxicos."
+            ),
+
+            # Compatibilidade com versões anteriores.
             "recebido": True,
-            "sucesso": False,
             "success": False,
-            "tokens": tokens,
-            "erros": errors,
+            "sucesso": False,
+            "tokens": tokens_legados,
+            "erros": erros_lexicos,
+
+            # Sequência completa produzida pelo scanner.
+            "tokens_parser": tokens_completos,
+
+            # Resultado léxico.
+            "sucesso_lexico": False,
+            "erros_lexicos": erros_lexicos,
+
+            # Resultado sintático.
+            "sucesso_sintatico": False,
+            "sintatico_executado": False,
             "ast": None,
-            "resumo": {
-                "total_tokens": len(tokens),
-                "total_erros": len(errors)
+            "erros_sintaticos": [],
+
+            # Contrato agrupado.
+            "lexico": {
+                "sucesso": False,
+                "tokens": tokens_completos,
+                "erros": erros_lexicos
+            },
+            "sintatico": {
+                "executado": False,
+                "sucesso": False,
+                "ast": None,
+                "erros": []
             }
         }
 
-    try:
-        # O lexer correto produz os tokens estruturais do parser.
-        parser_tokens = tokenize(code)
-        ast = Parser(parser_tokens).parse()
+    # -----------------------------------------------------
+    # 3. ANÁLISE SINTÁTICA
+    # -----------------------------------------------------
 
-    except CompilerError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=exc.mensagem
+    # O parser recebe exatamente a sequência completa
+    # produzida pelo lexer, inclusive tokens estruturais.
+    parser = Parser(tokens_completos)
+
+    resultado_sintatico = parser.analisar()
+
+    erros_sintaticos = formatar_erros_sintaticos(
+        resultado_sintatico["erros"]
+    )
+
+    sucesso_sintatico = len(erros_sintaticos) == 0
+
+    # A AST somente é disponibilizada quando a análise
+    # sintática termina sem erros.
+    ast = (
+        resultado_sintatico["ast"]
+        if sucesso_sintatico
+        else None
+    )
+
+    # -----------------------------------------------------
+    # 4. CONSOLIDAÇÃO
+    # -----------------------------------------------------
+
+    sucesso = sucesso_sintatico
+
+    if sucesso:
+        mensagem = (
+            "Análise léxica e sintática concluída com sucesso."
+        )
+    else:
+        mensagem = (
+            "A análise léxica foi concluída, "
+            "mas foram encontrados erros sintáticos."
         )
 
+    # -----------------------------------------------------
+    # 5. RESPOSTA
+    # -----------------------------------------------------
+
     return {
-        "mensagem": "Análise concluída com sucesso.",
+        "message": mensagem,
+
+        # Compatibilidade com a Etapa 3.
         "recebido": True,
-        "sucesso": True,
-        "success": True,
-        "tokens": [
-            token for token in parser_tokens
-            if token["tipo"] != "NOVA_LINHA"
-        ],
-        "erros": [],
+        "success": sucesso,
+        "sucesso": sucesso,
+        "tokens": tokens_legados,
+        "erros": erros_sintaticos,
+
+        # Sequência completa consumida pelo parser.
+        "tokens_parser": tokens_completos,
+
+        # Campos detalhados da Etapa 4.
+        "sucesso_lexico": True,
+        "sucesso_sintatico": sucesso_sintatico,
+        "sintatico_executado": True,
+        "erros_lexicos": [],
         "ast": ast,
-        "resumo": {
-            "total_tokens": len(parser_tokens),
-            "total_erros": 0
+        "erros_sintaticos": erros_sintaticos,
+
+        # Contrato agrupado.
+        "lexico": {
+            "sucesso": True,
+            "tokens": tokens_completos,
+            "erros": []
+        },
+        "sintatico": {
+            "executado": True,
+            "sucesso": sucesso_sintatico,
+            "ast": ast,
+            "erros": erros_sintaticos
         }
     }
-
-
-

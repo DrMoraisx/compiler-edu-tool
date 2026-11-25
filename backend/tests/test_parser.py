@@ -1,103 +1,359 @@
-import pytest
 
-from app.lexer import CompilerError, tokenize
+from app.lexer import analisar_lexico
 from app.parser import Parser
 
 
-def parse(src):
-    return Parser(tokenize(src)).parse()
+def analisar_codigo(codigo):
+    resultado_lexico = analisar_lexico(codigo)
+
+    assert resultado_lexico["erros"] == [], (
+        f"Erros léxicos encontrados: {resultado_lexico['erros']}"
+    )
+
+    parser = Parser(resultado_lexico["tokens"])
+
+    return parser.analisar()
 
 
-def test_assignment():
-    ast = parse("x = 10")
-    stmt = ast["body"][0]
-    assert stmt["type"] == "Assignment"
-    assert stmt["variable"] == "x"
-    assert stmt["value"] == {"type": "Literal", "kind": "number", "value": 10}
+def test_atribuicao_simples():
+    resultado = analisar_codigo("x = 10")
+
+    assert resultado["erros"] == []
+
+    ast = resultado["ast"]
+
+    assert ast["tipo"] == "Programa"
+    assert ast["corpo"][0]["tipo"] == "Atribuicao"
+    assert ast["corpo"][0]["identificador"] == "x"
+    assert ast["corpo"][0]["valor"]["valor"] == "10"
 
 
-def test_operator_precedence():
-    expr = parse("r = 1 + 2 * 3")["body"][0]["value"]
-    assert expr["operator"] == "+"
-    assert expr["right"]["operator"] == "*"
+def test_atribuicao_texto():
+    resultado = analisar_codigo('nome = "Maria"')
+
+    assert resultado["erros"] == []
+
+    atribuicao = resultado["ast"]["corpo"][0]
+
+    assert atribuicao["tipo"] == "Atribuicao"
+    assert atribuicao["identificador"] == "nome"
+    assert atribuicao["valor"]["tipo_valor"] == "texto"
 
 
-def test_parentheses_override_precedence():
-    expr = parse("r = (1 + 2) * 3")["body"][0]["value"]
-    assert expr["operator"] == "*"
-    assert expr["left"]["operator"] == "+"
+def test_literal_real():
+    resultado = analisar_codigo("preco = 3.14")
+
+    assert resultado["erros"] == []
+
+    valor = resultado["ast"]["corpo"][0]["valor"]
+
+    assert valor["tipo"] == "Literal"
+    assert valor["valor"] == "3.14"
+    assert valor["tipo_valor"] == "numero"
 
 
-def test_division_and_unary_minus():
-    expr = parse("r = -4 / 2")["body"][0]["value"]
-    assert expr["operator"] == "/"
-    assert expr["left"]["type"] == "UnaryExpression"
+def test_comando_print():
+    resultado = analisar_codigo("print(10)")
+
+    assert resultado["erros"] == []
+
+    comando = resultado["ast"]["corpo"][0]
+
+    assert comando["tipo"] == "Print"
+    assert comando["expressao"]["valor"] == "10"
 
 
-def test_print_with_string_and_multiple_args():
-    stmt = parse('print("soma:", 1 + 2)')["body"][0]
-    assert stmt["type"] == "PrintStatement"
-    assert len(stmt["arguments"]) == 2
-    assert stmt["arguments"][0]["kind"] == "string"
+def test_soma():
+    resultado = analisar_codigo("resultado = 10 + 5")
+
+    assert resultado["erros"] == []
+
+    expressao = resultado["ast"]["corpo"][0]["valor"]
+
+    assert expressao["tipo"] == "ExpressaoBinaria"
+    assert expressao["operador"] == "+"
 
 
-def test_if_else():
-    src = "if x > 1:\n    print(1)\nelse:\n    print(2)\ny = 3"
-    ast = parse(src)
-    assert len(ast["body"]) == 2  # if e a atribuição seguinte
-    node = ast["body"][0]
-    assert node["type"] == "IfStatement"
-    assert node["condition"]["operator"] == ">"
-    assert len(node["body"]) == 1
-    assert len(node["orelse"]) == 1
+def test_precedencia_multiplicacao():
+    resultado = analisar_codigo("resultado = 10 + 5 * 2")
+
+    assert resultado["erros"] == []
+
+    expressao = resultado["ast"]["corpo"][0]["valor"]
+
+    assert expressao["operador"] == "+"
+    assert expressao["direita"]["operador"] == "*"
 
 
-def test_elif_becomes_nested_if():
-    src = "if a:\n    x = 1\nelif b:\n    x = 2\nelse:\n    x = 3"
-    node = parse(src)["body"][0]
-    assert node["orelse"][0]["type"] == "IfStatement"
-    assert len(node["orelse"][0]["orelse"]) == 1
+def test_precedencia_parenteses():
+    resultado = analisar_codigo("resultado = (10 + 5) * 2")
+
+    assert resultado["erros"] == []
+
+    expressao = resultado["ast"]["corpo"][0]["valor"]
+
+    assert expressao["operador"] == "*"
+    assert expressao["esquerda"]["operador"] == "+"
 
 
-def test_function_definition_with_body():
-    src = "def soma(a, b):\n    return a + b\nr = soma(1, 2)"
-    ast = parse(src)
-    func = ast["body"][0]
-    assert func["type"] == "FunctionDef"
-    assert func["params"] == ["a", "b"]
-    assert func["body"][0]["type"] == "ReturnStatement"
-    assert ast["body"][1]["value"]["type"] == "CallExpression"
+def test_associatividade_subtracao_esquerda():
+    resultado = analisar_codigo("resultado = 20 - 5 - 3")
+
+    assert resultado["erros"] == []
+
+    expressao = resultado["ast"]["corpo"][0]["valor"]
+
+    assert expressao["operador"] == "-"
+    assert expressao["esquerda"]["operador"] == "-"
+    assert expressao["direita"]["valor"] == "3"
 
 
-def test_nested_blocks():
-    src = "if a:\n    if b:\n        print(1)\n    print(2)\nprint(3)"
-    ast = parse(src)
-    outer = ast["body"][0]
-    assert len(outer["body"]) == 2
-    assert outer["body"][0]["type"] == "IfStatement"
-    assert len(ast["body"]) == 2
+def test_associatividade_divisao_esquerda():
+    resultado = analisar_codigo("resultado = 20 / 5 / 2")
+
+    assert resultado["erros"] == []
+
+    expressao = resultado["ast"]["corpo"][0]["valor"]
+
+    assert expressao["operador"] == "/"
+    assert expressao["esquerda"]["operador"] == "/"
+    assert expressao["direita"]["valor"] == "2"
 
 
-def test_empty_program_with_only_comments():
-    assert parse("# nada aqui")["body"] == []
+def test_expressao_com_identificadores():
+    resultado = analisar_codigo("resultado = x + y")
+
+    assert resultado["erros"] == []
+
+    expressao = resultado["ast"]["corpo"][0]["valor"]
+
+    assert expressao["operador"] == "+"
+    assert expressao["esquerda"]["tipo"] == "Identificador"
+    assert expressao["direita"]["tipo"] == "Identificador"
 
 
-@pytest.mark.parametrize(
-    "src, fragment, line",
-    [
-        ("x = ", "Esperada uma expressão", 1),
-        ("if x > 1\n    print(1)", "Esperado ':'", 1),
-        ("if x:\nprint(1)", "bloco indentado", 2),
-        ("print(1", "Esperado ')'", 1),
-        ("else:\n    x = 1", "sem um 'if'", 1),
-        ("x = 1\n    y = 2", "Indentação inesperada", 2),
-        ("def f(a,):\n    return a", "nome de um parâmetro", 1),
-        ("x = 1 2", "Esperado fim da linha", 1),
-    ],
-)
-def test_syntax_errors(src, fragment, line):
-    with pytest.raises(CompilerError) as exc:
-        parse(src)
-    assert exc.value.phase == "sintático"
-    assert fragment in exc.value.message
-    assert exc.value.line == line
+def test_numero_negativo():
+    resultado = analisar_codigo("x = -10")
+
+    assert resultado["erros"] == []
+
+    valor = resultado["ast"]["corpo"][0]["valor"]
+
+    assert valor["tipo"] == "ExpressaoUnaria"
+    assert valor["operador"] == "-"
+
+
+def test_condicional_if():
+    codigo = (
+        "idade = 20\n"
+        "if idade >= 18:\n"
+        "    print(\"Maior de idade\")"
+    )
+
+    resultado = analisar_codigo(codigo)
+
+    assert resultado["erros"] == []
+
+    condicional = resultado["ast"]["corpo"][1]
+
+    assert condicional["tipo"] == "Condicional"
+    assert condicional["condicao"]["operador"] == ">="
+    assert len(condicional["corpo_if"]) == 1
+
+
+def test_condicional_if_else():
+    codigo = (
+        "idade = 20\n"
+        "if idade >= 18:\n"
+        "    print(\"Maior de idade\")\n"
+        "else:\n"
+        "    print(\"Menor de idade\")"
+    )
+
+    resultado = analisar_codigo(codigo)
+
+    assert resultado["erros"] == []
+
+    condicional = resultado["ast"]["corpo"][1]
+
+    assert condicional["tipo"] == "Condicional"
+    assert len(condicional["corpo_if"]) == 1
+    assert len(condicional["corpo_else"]) == 1
+
+    assert condicional["corpo_if"][0]["tipo"] == "Print"
+    assert condicional["corpo_else"][0]["tipo"] == "Print"
+
+
+def test_condicionais_aninhados():
+    codigo = (
+        "x = 3\n"
+        "if x > 0:\n"
+        "    if x < 5:\n"
+        "        print(x)\n"
+        "    else:\n"
+        "        print(\"maior\")\n"
+        "else:\n"
+        "    print(\"zero\")"
+    )
+
+    resultado = analisar_codigo(codigo)
+
+    assert resultado["erros"] == []
+
+    condicional_externo = resultado["ast"]["corpo"][1]
+
+    assert condicional_externo["tipo"] == "Condicional"
+
+    condicional_interno = condicional_externo["corpo_if"][0]
+
+    assert condicional_interno["tipo"] == "Condicional"
+    assert len(condicional_interno["corpo_if"]) == 1
+    assert len(condicional_interno["corpo_else"]) == 1
+
+    assert len(condicional_externo["corpo_else"]) == 1
+
+
+def test_multiplas_atribuicoes():
+    codigo = (
+        "x = 10\n"
+        "y = 5\n"
+        "resultado = x + y"
+    )
+
+    resultado = analisar_codigo(codigo)
+
+    assert resultado["erros"] == []
+    assert len(resultado["ast"]["corpo"]) == 3
+
+
+def test_erro_expressao_incompleta():
+    codigo = "x = 10 +\nprint(x)"
+
+    resultado = analisar_codigo(codigo)
+
+    assert len(resultado["erros"]) > 0
+
+    erro = resultado["erros"][0]
+
+    assert erro["linha"] == 1
+    assert erro["coluna"] == 9
+    assert erro["encontrado"] == "\n"
+    assert erro["esperado"]
+
+
+def test_erro_operador_sem_valor():
+    resultado = analisar_codigo("x = 5 *")
+
+    assert len(resultado["erros"]) > 0
+
+
+def test_erro_parenteses_nao_fechados():
+    resultado = analisar_codigo("print((10 + 5)")
+
+    assert len(resultado["erros"]) > 0
+
+
+def test_erro_comando_nao_reconhecido():
+    resultado = analisar_codigo("while x")
+
+    assert len(resultado["erros"]) > 0
+
+
+def test_erro_else_sem_if():
+    resultado = analisar_codigo("else:")
+
+    assert len(resultado["erros"]) > 0
+
+
+def test_posicao_dos_nos_ast():
+    resultado = analisar_codigo("x = 10")
+
+    atribuicao = resultado["ast"]["corpo"][0]
+
+    assert atribuicao["posicao"]["linha"] == 1
+    assert atribuicao["posicao"]["coluna"] == 1
+
+
+def test_programa_com_varias_linhas():
+    codigo = (
+        "x = 10\n"
+        "y = 5\n"
+        "resultado = x + y * 2\n"
+        "print(resultado)"
+    )
+
+    resultado = analisar_codigo(codigo)
+
+    assert resultado["erros"] == []
+    assert len(resultado["ast"]["corpo"]) == 4
+
+
+def test_programa_com_comentarios_e_linhas_vazias():
+    codigo = (
+        "# comentário inicial\n"
+        "\n"
+        "x = 10\n"
+        "# comentário intermediário\n"
+        "print(x)"
+    )
+
+    resultado = analisar_codigo(codigo)
+
+    assert resultado["erros"] == []
+    assert len(resultado["ast"]["corpo"]) == 2
+
+
+def test_programa_vazio():
+    resultado = analisar_codigo("")
+
+    assert resultado["erros"] == []
+    assert resultado["ast"]["tipo"] == "Programa"
+    assert resultado["ast"]["corpo"] == []
+
+
+def test_recuperacao_de_erros_em_linhas_diferentes():
+    codigo = (
+        "x =\n"
+        "y =\n"
+        "z = 10"
+    )
+
+    resultado = analisar_codigo(codigo)
+
+    assert len(resultado["erros"]) >= 2
+
+    assert resultado["erros"][0]["linha"] == 1
+    assert resultado["erros"][1]["linha"] == 2
+
+
+def test_operacao_com_modulo():
+    resultado = analisar_codigo("resto = 10 % 3")
+
+    assert resultado["erros"] == []
+
+    expressao = resultado["ast"]["corpo"][0]["valor"]
+
+    assert expressao["tipo"] == "ExpressaoBinaria"
+    assert expressao["operador"] == "%"
+
+
+def test_operadores_relacionais():
+    operadores = [
+        "==",
+        "!=",
+        "<",
+        ">",
+        "<=",
+        ">="
+    ]
+
+    for operador in operadores:
+        resultado = analisar_codigo(
+            f"resultado = a {operador} b"
+        )
+
+        assert resultado["erros"] == []
+
+        expressao = resultado["ast"]["corpo"][0]["valor"]
+
+        assert expressao["operador"] == operador

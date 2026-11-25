@@ -1,66 +1,232 @@
-# Tutorial: entendendo o analisador léxico (scanner)
 
-Tutorial inicial para quem está aprendendo compiladores com o **EDUTER_TOOL**.
+# Tutorial: análise léxica e sintática do Mini-Python
 
-## 1. O que é um scanner?
-Um compilador não "entende" o código de uma vez. Ele trabalha em fases. A primeira é a
-**análise léxica**: ler o texto caractere por caractere e separá-lo em pedaços com significado.
-Esses pedaços são os **tokens**. O programa que faz isso se chama **scanner** (ou lexer).
+Tutorial educacional do Compiler Edu Tool.
 
-## 2. Token e lexema
-- **Lexema:** o trecho exato do código. Em `numero = 10`, os lexemas são `numero`, `=` e `10`.
-- **Token:** o lexema classificado em uma **categoria**, com a posição onde apareceu.
+## 1. O que é um compilador?
 
-| Lexema | Categoria do token | Linha | Coluna |
-|---|---|---|---|
-| `numero` | `IDENTIFICADOR` | 1 | 1 |
-| `=` | `OPERADOR` | 1 | 8 |
-| `10` | `LITERAL_INTEIRO` | 1 | 10 |
+Um compilador é um programa que analisa um código-fonte para verificar sua estrutura e, em etapas posteriores, seu significado.
 
-## 3. Como o scanner percorre o código
-1. Pula espaços e comentários.
-2. Olha o caractere atual para decidir o que está começando: uma letra (palavra ou nome), um dígito
-   (número), uma aspa (string) ou um símbolo (operador ou delimitador).
-3. Continua lendo enquanto os caracteres seguintes ainda pertencem ao mesmo lexema.
-4. Classifica o lexema e guarda linha e coluna.
-5. Repete até o fim do código.
+Nesta versão do Compiler Edu Tool, são trabalhadas duas etapas:
 
-Exemplo com `y = 3.5`:
+1. Análise léxica.
+2. Análise sintática.
 
-```
-y   -> começa com letra          -> IDENTIFICADOR
-=   -> símbolo de atribuição     -> OPERADOR
-3.5 -> dígito, ponto, dígito     -> LITERAL_REAL
-```
+A análise semântica será desenvolvida na Etapa 5.
 
-## 4. Palavra reservada ou identificador?
-O scanner lê a palavra inteira e depois consulta a lista de palavras reservadas.
-`if` é `PALAVRA_RESERVADA`, mas `iffy` é `IDENTIFICADOR`. Maiúsculas importam: `True` é reservada, `true` não.
+## 2. Análise léxica
 
-## 5. A indentação do Python também gera tokens
-Em Python, o recuo define os blocos. Por isso o scanner emite `NOVA_LINHA` (fim da linha),
-`INDENTACAO` (recuo aumentou) e `DESINDENTACAO` (recuo diminuiu). Na interface eles aparecem
-em cinza, com os símbolos ↵, → e ←.
+A análise léxica é responsável por ler o código-fonte e identificar suas unidades mínimas, chamadas tokens.
 
-## 6. Erros léxicos
-O scanner reporta o que não consegue reconhecer, **sem parar**, para que você veja todos os
-problemas de uma vez. Experimente o **Exemplo 5**:
+Exemplo:
 
 ```python
-preco = 10 @ 2          # '@' não faz parte da linguagem
-nome = "sem fechar      # string sem aspas de fechamento
-valor = 12abc           # número malformado
+numero = 10
 ```
 
-## 7. Roteiro para praticar na ferramenta
-1. Escolha o **Exemplo 1** e clique em **ANALISAR CÓDIGO**.
-2. Abra **TOKENS** e confira tipo, lexema, linha e coluna de cada um.
-3. Abra **CÓDIGO COLORIDO** e compare o código original com a sequência de tokens.
-4. Abra **PASSO A PASSO** e use **Próximo** para ver o scanner lendo um token por vez.
-5. Carregue o **Exemplo 6** (todas as categorias) e o **Exemplo 5** (erros).
-6. Escreva seu próprio código, insira um erro de propósito e observe a mensagem.
+O scanner reconhece:
 
-## 8. E depois?
-O scanner só reconhece tokens: ele não verifica se o programa está bem estruturado.
-Isso é papel do **analisador sintático** (próxima etapa). Por exemplo, `if if if` é
-tokenizado normalmente, pois todos os tokens são válidos.
+| Lexema | Tipo | Linha | Coluna |
+|---|---|---|---|
+| `numero` | IDENTIFICADOR | 1 | 1 |
+| `=` | OPERADOR | 1 | 8 |
+| `10` | LITERAL_INTEIRO | 1 | 10 |
+
+O lexema é o texto encontrado no código. O tipo indica a categoria à qual ele pertence.
+
+## 3. Como o scanner reconhece os tokens?
+
+O scanner percorre o código da esquerda para a direita.
+
+De acordo com o caractere encontrado, identifica se o próximo elemento é:
+
+- Uma palavra reservada.
+- Um identificador.
+- Um número.
+- Uma string.
+- Um operador.
+- Um delimitador.
+
+Também registra a linha e a coluna de cada token.
+
+Espaços e comentários são ignorados.
+
+## 4. Análise sintática
+
+Depois da análise léxica, os tokens são enviados ao parser.
+
+O parser verifica se a sequência de tokens respeita a gramática do Mini-Python.
+
+Exemplo:
+
+```python
+numero = 10
+print(numero)
+```
+
+O scanner identifica os tokens.
+
+O parser reconhece duas construções:
+
+1. Uma atribuição.
+2. Um comando de saída.
+
+A análise sintática organiza esses elementos em uma estrutura hierárquica.
+
+## 5. O que é uma AST?
+
+AST significa Árvore Sintática Abstrata.
+
+Ela representa a estrutura do programa por meio de nós.
+
+Exemplo:
+
+```python
+resultado = 10 + 5 * 2
+```
+
+Representação simplificada:
+
+```text
+Programa
+└── Atribuicao
+    ├── Identificador: resultado
+    └── ExpressaoBinaria: +
+        ├── Literal: 10
+        └── ExpressaoBinaria: *
+            ├── Literal: 5
+            └── Literal: 2
+```
+
+A multiplicação aparece dentro da soma porque possui maior precedência.
+
+## 6. Precedência dos operadores
+
+A precedência determina qual operação é reconhecida primeiro.
+
+No subconjunto atual:
+
+1. Parênteses e valores.
+2. Negação unária.
+3. Multiplicação, divisão e módulo.
+4. Adição e subtração.
+5. Comparações.
+
+Exemplo:
+
+```python
+resultado = 10 + 5 * 2
+```
+
+O parser reconhece primeiro `5 * 2` e depois a soma com `10`.
+
+Os parênteses podem alterar o agrupamento:
+
+```python
+resultado = (10 + 5) * 2
+```
+
+## 7. Condicionais e indentação
+
+O Mini-Python utiliza indentação para representar blocos.
+
+Exemplo:
+
+```python
+idade = 20
+
+if idade >= 18:
+    print("Maior de idade")
+else:
+    print("Menor de idade")
+```
+
+O scanner produz tokens estruturais para indicar:
+
+- Fim de linha.
+- Início de bloco.
+- Final de bloco.
+
+O parser utiliza esses tokens para identificar o conteúdo do `if` e do `else`.
+
+## 8. Entendendo os erros
+
+### 8.1. Erro léxico
+
+Exemplo:
+
+```python
+numero = 10 @ 2
+```
+
+O caractere `@` não pertence ao subconjunto reconhecido pelo lexer principal.
+
+O scanner registra o erro com linha e coluna.
+
+O parser não é executado quando existem erros léxicos.
+
+### 8.2. Erro sintático
+
+Exemplo:
+
+```python
+resultado = 10 +
+```
+
+O scanner consegue identificar os tokens, mas o parser encontra uma expressão incompleta.
+
+O diagnóstico informa a localização, o elemento encontrado e o elemento esperado, quando identificado.
+
+### 8.3. Parêntese não fechado
+
+Exemplo:
+
+```python
+print((10 + 5)
+```
+
+A expressão não possui todos os delimitadores necessários.
+
+O parser identifica a construção incompleta e registra um erro sintático.
+
+## 9. Como utilizar a interface
+
+1. Abra a aplicação no navegador.
+2. Escolha um dos exemplos disponíveis ou digite um código.
+3. Clique em **ANALISAR CÓDIGO**.
+4. Consulte a aba **Árvore AST** para visualizar a estrutura reconhecida.
+5. Selecione um nó para consultar sua posição e regra gramatical.
+6. Utilize os controles para expandir ou recolher a árvore.
+7. Consulte a aba **Tokens** para ver os elementos reconhecidos pelo scanner.
+8. Consulte a aba **Erros** para verificar os diagnósticos.
+9. Consulte a aba **Gramática** para visualizar as principais regras.
+10. Utilize a aba **JSON** para consultar a resposta estruturada.
+
+A AST pode ser exportada em formato JSON quando a análise sintática for bem-sucedida.
+
+## 10. Limitações do subconjunto
+
+A aplicação não implementa toda a linguagem Python.
+
+Não são reconhecidos sintaticamente nesta versão:
+
+- Laços `while` e `for`.
+- Definições de funções.
+- Parâmetros e retorno.
+- Declarações tipadas.
+- Operadores lógicos.
+- Listas e dicionários.
+- Classes.
+- Importações.
+
+O código não é executado. A aplicação realiza análise léxica e sintática.
+
+## 11. Próxima etapa
+
+Na Etapa 5, a AST poderá ser utilizada para implementar análise semântica, como:
+
+- Verificação de variáveis declaradas.
+- Tabela de símbolos.
+- Compatibilidade de tipos.
+- Validação de operações.
+- Diagnósticos semânticos.

@@ -1,56 +1,58 @@
-"""Analisador léxico (scanner) do Mini-Python.
 
-Lê o código-fonte caractere a caractere, agrupa os caracteres em lexemas e
-classifica cada lexema em uma categoria de token. Espaços e comentários são
-ignorados. Como o Python usa indentação para delimitar blocos, o scanner
-também emite os tokens estruturais NOVA_LINHA, INDENTACAO e DESINDENTACAO.
+import re
+from dataclasses import dataclass
 
-O scanner NÃO interrompe a leitura ao encontrar um erro: ele registra o erro
-(com linha e coluna) e continua, para que todos os problemas apareçam de uma vez.
-"""
 
-# ---------- categorias de token ----------
-PALAVRA_RESERVADA = "PALAVRA_RESERVADA"
-IDENTIFICADOR = "IDENTIFICADOR"
-LITERAL_INTEIRO = "LITERAL_INTEIRO"
-LITERAL_REAL = "LITERAL_REAL"
-LITERAL_STRING = "LITERAL_STRING"
-OPERADOR = "OPERADOR"
-DELIMITADOR = "DELIMITADOR"
-NOVA_LINHA = "NOVA_LINHA"
-INDENTACAO = "INDENTACAO"
-DESINDENTACAO = "DESINDENTACAO"
+# =========================================================
+# DEFINIÇÃO DOS TOKENS
+# =========================================================
 
-ESTRUTURAIS = {NOVA_LINHA, INDENTACAO, DESINDENTACAO}
-
-# ---------- escopo léxico ----------
 PALAVRAS_RESERVADAS = {
-    "if", "elif", "else", "while", "def", "return", "print",
-    "and", "or", "not", "True", "False", "None",
+    "if",
+    "else",
+    "print",
 }
-OPERADORES_DUPLOS = {"==", "!=", "<=", ">=", "//", "**", "+=", "-=", "*=", "/="}
-OPERADORES_SIMPLES = set("+-*/%<>=")
-DELIMITADORES = set("():,")
+
+OPERADORES_SIMPLES = {
+    "+", "-", "*", "/", "%", "=", "<", ">",
+}
+
+OPERADORES_DUPLOS = {
+    "==", "!=", "<=", ">=", "+=", "-=", "*=", "/=",
+}
+
+OPERADORES = OPERADORES_SIMPLES | OPERADORES_DUPLOS
+
+DELIMITADORES = {
+    "(", ")", ":", ",",
+}
+
+ESTRUTURAIS = {
+    "NOVA_LINHA",
+    "INDENTACAO",
+    "DESINDENTACAO",
+    "INDENT",
+    "DEDENT",
+    "EOF",
+}
 
 
 class CompilerError(Exception):
-    """Erro léxico ou sintático, com posição no código-fonte."""
+    """Erro léxico apresentado de forma estruturada."""
 
-    def __init__(self, fase, mensagem, linha, coluna, lexema=""):
-        super().__init__(mensagem)
-        self.fase = fase
-        self.phase = fase
-        self.message = mensagem
+    def __init__(self, mensagem, fase="léxico", linha=1, coluna=1,
+                 lexema="", tipo="ERRO_LEXICO"):
         self.mensagem = mensagem
+        self.fase = fase
         self.linha = linha
         self.coluna = coluna
         self.lexema = lexema
-        self.line = linha
-        self.column = coluna
+        self.tipo = tipo
+        super().__init__(mensagem)
 
     def to_dict(self):
         return {
-            "tipo": "ERRO_LEXICO" if self.fase == "léxico" else "ERRO_SINTATICO",
+            "tipo": self.tipo,
             "lexema": self.lexema,
             "linha": self.linha,
             "coluna": self.coluna,
@@ -58,162 +60,372 @@ class CompilerError(Exception):
         }
 
 
-def _token(tipo, lexema, linha, coluna):
-    return {"tipo": tipo, "lexema": lexema, "linha": linha, "coluna": coluna}
+@dataclass
+class Token:
+    tipo: str
+    lexema: str
+    linha: int
+    coluna: int
+
+    def to_dict(self):
+        return {
+            "tipo": self.tipo,
+            "lexema": self.lexema,
+            "linha": self.linha,
+            "coluna": self.coluna,
+        }
 
 
-def scan(source):
-    """Executa o scanner e devolve (tokens, erros).
+# =========================================================
+# ANALISADOR LÉXICO
+# =========================================================
 
-    Os erros têm o formato:
-    {"tipo": "ERRO_LEXICO", "lexema": ..., "linha": ..., "coluna": ..., "mensagem": ...}
-    """
-    tokens = []
-    erros = []
-    indents = [0]
-    text = source.replace("\r\n", "\n").replace("\r", "\n").expandtabs(4)
-    lines = text.split("\n")
-    last_line = len(lines)
+class Lexer:
+    PALAVRAS_RESERVADAS = PALAVRAS_RESERVADAS
+    OPERADORES = OPERADORES
+    DELIMITADORES = DELIMITADORES
 
-    def erro(mensagem, lexema, linha, coluna):
-        erros.append(
-            {
-                "tipo": "ERRO_LEXICO",
-                "lexema": lexema,
-                "linha": linha,
-                "coluna": coluna,
-                "mensagem": mensagem,
-            }
+    def __init__(self, codigo):
+        self.codigo = codigo or ""
+        self.tokens = []
+        self.erros = []
+        self.indentacoes = [0]
+
+    def adicionar_token(self, tipo, lexema, linha, coluna):
+        self.tokens.append({
+            "tipo": tipo,
+            "lexema": lexema,
+            "linha": linha,
+            "coluna": coluna,
+        })
+
+    def adicionar_erro(self, lexema, linha, coluna, mensagem):
+        self.erros.append({
+            "tipo": "ERRO_LEXICO",
+            "lexema": lexema,
+            "linha": linha,
+            "coluna": coluna,
+            "mensagem": mensagem,
+        })
+
+    @staticmethod
+    def identificador_inicio(caractere):
+        return caractere == "_" or caractere.isalpha()
+
+    @staticmethod
+    def identificador_parte(caractere):
+        return caractere == "_" or caractere.isalnum()
+
+    def analisar_linha(self, conteudo, numero_linha):
+        # Expande tabulações para quatro espaços.
+        conteudo = conteudo.expandtabs(4)
+
+        if not conteudo.strip():
+            return
+
+        sem_espacos = conteudo.lstrip(" ")
+        if sem_espacos.startswith("#"):
+            return
+
+        espacos = len(conteudo) - len(sem_espacos)
+
+        if espacos > self.indentacoes[-1]:
+            self.indentacoes.append(espacos)
+            self.adicionar_token(
+                "INDENTACAO", "", numero_linha, 1
+            )
+
+        elif espacos < self.indentacoes[-1]:
+            while (
+                len(self.indentacoes) > 1
+                and espacos < self.indentacoes[-1]
+            ):
+                self.indentacoes.pop()
+                self.adicionar_token(
+                    "DESINDENTACAO", "", numero_linha, 1
+                )
+
+            if espacos != self.indentacoes[-1]:
+                self.adicionar_erro(
+                    "",
+                    numero_linha,
+                    1,
+                    "Indentação inconsistente no subconjunto suportado.",
+                )
+
+        texto = conteudo[espacos:]
+        posicao = 0
+
+        while posicao < len(texto):
+            caractere = texto[posicao]
+            coluna = espacos + posicao + 1
+
+            if caractere.isspace():
+                posicao += 1
+                continue
+
+            # Comentário fora de strings.
+            if caractere == "#":
+                break
+
+            # Strings.
+            if caractere in ('"', "'"):
+                aspas = caractere
+                inicio = posicao
+                posicao += 1
+                fechou = False
+
+                while posicao < len(texto):
+                    atual = texto[posicao]
+
+                    if atual == "\\":
+                        posicao += 2
+                        continue
+
+                    if atual == aspas:
+                        posicao += 1
+                        fechou = True
+                        break
+
+                    posicao += 1
+
+                lexema = texto[inicio:min(posicao, len(texto))]
+
+                if fechou:
+                    self.adicionar_token(
+                        "LITERAL_STRING",
+                        lexema,
+                        numero_linha,
+                        coluna,
+                    )
+                else:
+                    self.adicionar_erro(
+                        lexema,
+                        numero_linha,
+                        coluna,
+                        "String não terminada no subconjunto suportado.",
+                    )
+
+                continue
+
+            # Números inteiros e reais.
+            if caractere.isdigit():
+                inicio = posicao
+
+                while (
+                    posicao < len(texto)
+                    and texto[posicao].isdigit()
+                ):
+                    posicao += 1
+
+                tipo_numero = "LITERAL_INTEIRO"
+
+                if (
+                    posicao + 1 < len(texto)
+                    and texto[posicao] == "."
+                    and texto[posicao + 1].isdigit()
+                ):
+                    tipo_numero = "LITERAL_REAL"
+                    posicao += 1
+
+                    while (
+                        posicao < len(texto)
+                        and texto[posicao].isdigit()
+                    ):
+                        posicao += 1
+
+                # Número seguido diretamente por identificador.
+                if (
+                    posicao < len(texto)
+                    and self.identificador_inicio(texto[posicao])
+                ):
+                    while (
+                        posicao < len(texto)
+                        and self.identificador_parte(texto[posicao])
+                    ):
+                        posicao += 1
+
+                    lexema = texto[inicio:posicao]
+                    self.adicionar_erro(
+                        lexema,
+                        numero_linha,
+                        coluna,
+                        "Número malformado no subconjunto suportado.",
+                    )
+                    continue
+
+                lexema = texto[inicio:posicao]
+                self.adicionar_token(
+                    tipo_numero,
+                    lexema,
+                    numero_linha,
+                    coluna,
+                )
+                continue
+
+            # Identificadores e palavras reservadas.
+            if self.identificador_inicio(caractere):
+                inicio = posicao
+                posicao += 1
+
+                while (
+                    posicao < len(texto)
+                    and self.identificador_parte(texto[posicao])
+                ):
+                    posicao += 1
+
+                lexema = texto[inicio:posicao]
+
+                tipo = (
+                    "PALAVRA_RESERVADA"
+                    if lexema in PALAVRAS_RESERVADAS
+                    else "IDENTIFICADOR"
+                )
+
+                self.adicionar_token(
+                    tipo,
+                    lexema,
+                    numero_linha,
+                    coluna,
+                )
+                continue
+
+            # Operadores: tenta reconhecer primeiro os de dois caracteres.
+            operador_encontrado = None
+
+            if posicao + 1 < len(texto):
+                candidato = texto[posicao:posicao + 2]
+                if candidato in OPERADORES_DUPLOS:
+                    operador_encontrado = candidato
+
+            if operador_encontrado:
+                self.adicionar_token(
+                    "OPERADOR",
+                    operador_encontrado,
+                    numero_linha,
+                    coluna,
+                )
+                posicao += 2
+                continue
+
+            if caractere in OPERADORES_SIMPLES:
+                self.adicionar_token(
+                    "OPERADOR",
+                    caractere,
+                    numero_linha,
+                    coluna,
+                )
+                posicao += 1
+                continue
+
+            # Delimitadores.
+            if caractere in DELIMITADORES:
+                self.adicionar_token(
+                    "DELIMITADOR",
+                    caractere,
+                    numero_linha,
+                    coluna,
+                )
+                posicao += 1
+                continue
+
+            # Exclamação isolada.
+            if caractere == "!":
+                self.adicionar_erro(
+                    caractere,
+                    numero_linha,
+                    coluna,
+                    "Operador inválido. Você quis utilizar '!='?",
+                )
+                posicao += 1
+                continue
+
+            # Qualquer outro caractere.
+            self.adicionar_erro(
+                caractere,
+                numero_linha,
+                coluna,
+                (
+                    f"Caractere '{caractere}' não pertence ao "
+                    "subconjunto suportado da linguagem."
+                ),
+            )
+            posicao += 1
+
+        self.adicionar_token(
+            "NOVA_LINHA",
+            "\n",
+            numero_linha,
+            len(conteudo) + 1,
         )
 
-    for lineno, line in enumerate(lines, 1):
-        stripped = line.lstrip(" ")
-        # Linhas em branco e de comentário não geram tokens.
-        if stripped == "" or stripped.startswith("#"):
-            continue
+    def analisar(self):
+        linhas = self.codigo.splitlines()
 
-        indent = len(line) - len(stripped)
-        if indent > indents[-1]:
-            indents.append(indent)
-            tokens.append(_token(INDENTACAO, "", lineno, 1))
-        else:
-            while indent < indents[-1]:
-                indents.pop()
-                tokens.append(_token(DESINDENTACAO, "", lineno, 1))
-            if indent != indents[-1]:
-                erro(
-                    "Indentação inconsistente: o recuo desta linha não corresponde "
-                    "a nenhum nível de indentação anterior.",
-                    line[:indent],
-                    lineno,
-                    1,
-                )
+        for numero_linha, conteudo in enumerate(linhas, start=1):
+            self.analisar_linha(conteudo, numero_linha)
 
-        i = indent
-        n = len(line)
-        while i < n:
-            ch = line[i]
-            col = i + 1
+        # Fecha todos os blocos abertos.
+        ultima_linha = max(len(linhas), 1)
 
-            if ch == " ":
-                i += 1
-            elif ch == "#":
-                break  # comentário de linha: ignora o resto
-            elif ch.isdigit():
-                j = i
-                while j < n and line[j].isdigit():
-                    j += 1
-                real = False
-                if j + 1 < n and line[j] == "." and line[j + 1].isdigit():
-                    real = True
-                    j += 1
-                    while j < n and line[j].isdigit():
-                        j += 1
-                if j < n and (line[j].isalpha() or line[j] == "_"):
-                    while j < n and (line[j].isalnum() or line[j] == "_"):
-                        j += 1
-                    erro(
-                        f"Número malformado '{line[i:j]}': um identificador "
-                        "não pode começar com dígito.",
-                        line[i:j],
-                        lineno,
-                        col,
-                    )
-                else:
-                    tipo = LITERAL_REAL if real else LITERAL_INTEIRO
-                    tokens.append(_token(tipo, line[i:j], lineno, col))
-                i = j
-            elif ch.isalpha() or ch == "_":
-                j = i
-                while j < n and (line[j].isalnum() or line[j] == "_"):
-                    j += 1
-                palavra = line[i:j]
-                tipo = PALAVRA_RESERVADA if palavra in PALAVRAS_RESERVADAS else IDENTIFICADOR
-                tokens.append(_token(tipo, palavra, lineno, col))
-                i = j
-            elif ch in "\"'":
-                j = i + 1
-                fechada = False
-                while j < n:
-                    if line[j] == "\\":  # sequência de escape: pula o próximo caractere
-                        j += 2
-                        continue
-                    if line[j] == ch:
-                        fechada = True
-                        break
-                    j += 1
-                if fechada:
-                    tokens.append(_token(LITERAL_STRING, line[i:j + 1], lineno, col))
-                    i = j + 1
-                else:
-                    erro(
-                        f"String não terminada: as aspas {ch} abertas aqui "
-                        "não foram fechadas na mesma linha.",
-                        line[i:].rstrip(),
-                        lineno,
-                        col,
-                    )
-                    i = n
-            elif line[i:i + 2] in OPERADORES_DUPLOS:
-                tokens.append(_token(OPERADOR, line[i:i + 2], lineno, col))
-                i += 2
-            elif ch in OPERADORES_SIMPLES:
-                tokens.append(_token(OPERADOR, ch, lineno, col))
-                i += 1
-            elif ch in DELIMITADORES:
-                tokens.append(_token(DELIMITADOR, ch, lineno, col))
-                i += 1
-            elif ch == "!":
-                erro(
-                    "Operador incompleto '!': para comparar valores diferentes use '!='.",
-                    "!",
-                    lineno,
-                    col,
-                )
-                i += 1
-            else:
-                erro(
-                    f"Caractere não reconhecido '{ch}'. "
-                    "Verifique se ele faz parte do subconjunto suportado.",
-                    ch,
-                    lineno,
-                    col,
-                )
-                i += 1
+        while len(self.indentacoes) > 1:
+            self.indentacoes.pop()
+            self.adicionar_token(
+                "DESINDENTACAO",
+                "",
+                ultima_linha,
+                1,
+            )
 
-        tokens.append(_token(NOVA_LINHA, "", lineno, n + 1))
-
-    while len(indents) > 1:
-        indents.pop()
-        tokens.append(_token(DESINDENTACAO, "", last_line, 1))
-
-    return tokens, erros
+        return self.tokens, self.erros
 
 
-def tokenize(source):
-    """Versão estrita: devolve os tokens ou levanta CompilerError no primeiro erro."""
-    tokens, erros = scan(source)
+# =========================================================
+# INTERFACES COMPATÍVEIS COM A ETAPA 3
+# =========================================================
+
+def scan(codigo):
+    """Retorna (tokens, erros), sem lançar exceção."""
+    lexer = Lexer(codigo)
+    return lexer.analisar()
+
+
+def tokenize(codigo):
+    """Retorna tokens ou lança CompilerError no primeiro erro."""
+    tokens, erros = scan(codigo)
+
     if erros:
-        e = erros[0]
-        raise CompilerError("léxico", e["mensagem"], e["linha"], e["coluna"], e["lexema"])
+        erro = erros[0]
+        raise CompilerError(
+            mensagem=erro["mensagem"],
+            fase="léxico",
+            linha=erro["linha"],
+            coluna=erro["coluna"],
+            lexema=erro["lexema"],
+        )
+
     return tokens
+
+
+def analisar_lexico(codigo):
+    """Interface utilizada pela API e pelo Parser."""
+    tokens, erros = scan(codigo)
+
+    # Mantém os nomes estruturais esperados pelo Parser atual.
+    tokens_api = []
+
+    for token in tokens:
+        convertido = dict(token)
+
+        if convertido["tipo"] == "INDENTACAO":
+            convertido["tipo"] = "INDENT"
+
+        elif convertido["tipo"] == "DESINDENTACAO":
+            convertido["tipo"] = "DEDENT"
+
+        tokens_api.append(convertido)
+
+    return {
+        "tokens": tokens_api,
+        "erros": erros,
+    }
